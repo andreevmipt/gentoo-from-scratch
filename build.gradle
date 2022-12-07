@@ -1,0 +1,60 @@
+buildscript {
+    ext {
+
+    }
+    repositories {
+        maven { url "http://artifactory.host:8081/artifactory/gradle" }
+        maven { url "http://artifactory.host:8081/artifactory/remote-repos" }
+        maven { url "http://artifactory.host:8081/artifactory/third-party-proprietary" }
+        maven {
+            credentials {
+                username "username"
+                password "password"
+            }
+            url "http://artifactory.host:8081/artifactory/project-release-local"
+        }
+        maven {
+            credentials {
+                username "username"
+                password "password"
+            }
+            url "http://artifactory.host:8081/artifactory/project"
+        }
+    }
+    dependencies {
+        classpath("com.palantir.gradle.docker:gradle-docker:0.13.0")
+    }
+}
+plugins {
+    id 'application'
+    id 'java'
+}
+apply plugin: "com.palantir.docker"
+
+ext {
+    releaseVersion='1.0'
+    artifactVersion = "$releaseVersion"
+    dockerRepositoryName = "docker-local"
+}
+
+repositories {
+    repositories {
+        mavenLocal()
+        maven { url 'http://artifactory.host:8081/artifactory/remote-repos' }
+        maven { url "http://artifactory.host:8081/artifactory/jcenter-cache" }
+        maven { url 'http://artifactory.host:8081/artifactory/gradle' }
+        maven { url 'http://artifactory.host:8081/artifactory/third-party-proprietary' }
+        maven {
+            credentials {
+                username "username"
+                password "password"
+            }
+            url 'http://artifactory.host:8081/artifactory/project'
+        }
+    }
+}
+
+
+docker {
+    name "artifactory.host:5000/${dockerRepositoryName}/${rootProject.name}:${artifactVersion}"
+}

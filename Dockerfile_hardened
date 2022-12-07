@@ -1,0 +1,75 @@
+# syntax = docker/dockerfile:1.0-experimental
+# Use the empty image with the portage tree as the first stage
+FROM gentoo/portage:latest as portage
+
+# Gentoo stage3 is the second stage, basically an unpacked Gentoo Linux
+FROM gentoo/stage3:amd64-hardened-nomultilib as base
+#FROM gentoo/stage3-amd64:latest as base
+
+MAINTAINER Mikhail Andreev "andreev.mipt@gmail.com"
+
+# Copy the portage tree into the current stage
+#COPY --from=portage /var/db/repos/gentoo /var/db/repos/gentoo
+# We can't use any sandboxing in the container.
+ENV FEATURES="-ipc-sandbox -mount-sandbox -network-sandbox -pid-sandbox -sandbox -usersandbox"
+
+# Add make.conf to override the march.
+# This allows packages to be optimized specifically for the host CPU.
+#COPY base/pre-build/ /
+
+RUN echo "PYTHON_TARGETS='python3_7 python3_8'" >> /etc/portage/make.conf
+RUN echo "PYTHON_SINGLE_TARGET='python3_8'" >> /etc/portage/make.conf
+
+RUN --mount=type=bind,target=/var/db/repos/gentoo,source=/var/db/repos/gentoo,from=portage \
+    --mount=type=cache,id=distfiles,target=/var/cache/distfiles \
+    --mount=type=cache,id=base-binpkgs,target=/var/cache/binpkgs \
+    emerge --buildpkg \
+           --usepkg \
+	   --binpkg-respect-use=y \
+	   --binpkg-changed-deps=y \
+	   --tree \
+	   -vjND \
+	   -Du @world
+
+
+FROM base as binpkgs
+RUN --mount=type=bind,target=/var/db/repos/gentoo,source=/var/db/repos/gentoo,from=portage \
+    --mount=type=cache,id=distfiles,target=/var/cache/distfiles \
+    --mount=type=cache,id=base-binpkgs,target=/var/cache/binpkgs \
+    emerge --buildpkg \
+           --usepkg \
+	   --binpkg-respect-use=y \
+	   --binpkg-changed-deps=y \
+	   --tree \
+	   -vjuND \
+	   -Du dev-lang/python:3.8 dev-python/pip dev-python/tox app-shells/bash dev-python/wheel \
+	        sys-devel/gcc sys-kernel/linux-headers sys-devel/binutils \
+	        app-shells/bash-completion net-misc/wget net-analyzer/netcat net-misc/iputils net-dns/bind-tools
+
+RUN cd /var/db/pkg/ && quickpkg --include-config y "*/*"
+RUN echo "dev-python/pip vanilla" >> /etc/portage/package.use/python.use
+
+ENV ROOT="/destination"
+RUN --mount=type=bind,target=/var/db/repos/gentoo,source=/var/db/repos/gentoo,from=portage \
+    --mount=type=cache,id=distfiles,target=/var/cache/distfiles \
+    --mount=type=cache,id=base-binpkgs,target=/var/cache/binpkgs \
+    emerge --buildpkg \
+           --usepkg \
+	   --binpkg-respect-use=y \
+	   --binpkg-changed-deps=y \
+	   --tree \
+	   -vj \
+	   -Du dev-lang/python:3.8 dev-python/pip dev-python/tox app-shells/bash dev-python/wheel \
+	        sys-devel/gcc sys-kernel/linux-headers sys-devel/binutils \
+	        app-shells/bash-completion net-misc/wget net-analyzer/netcat net-misc/iputils net-dns/bind-tools
+
+# Start from an empty image
+FROM scratch
+
+# Copy the destination files from the previous stage
+COPY --from=binpkgs /destination /
+RUN eselect python set python3.8
+
+RUN mkdir ~/.pip && \
+    printf "[global]\ntimeout = 1000\nindex-url = https://artifactory.host/artifactory/api/pypi/pypi-remote/simple" >> ~/.pip/pip.conf && \
+    python -m pip install --trusted-host artifactory.host invoke
